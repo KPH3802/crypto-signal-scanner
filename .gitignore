@@ -1,5 +1,6 @@
 # Credentials
 config.py
+cdp_api_key.json
 
 # Database
 *.db
@@ -9,6 +10,10 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# Results / local outputs
+results_*.txt
+autotrader.db
 
 # OS
 .DS_Store
