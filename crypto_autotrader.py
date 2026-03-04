@@ -4,22 +4,30 @@ crypto_autotrader.py
 ====================
 Coinbase Advanced Trade auto-executor for the crypto signal scanner.
 
-Strategy (backtest-validated, OOS +7.27% alpha):
-  - BUY when scanner fires Score ≥ 2
-  - SELL after 3-day hold
-  - Position size scaled by score
-  - Trades the 34-coin Coinbase-tradable universe across 3 buckets
+Executes trades based on a composite signal scoring system that evaluates
+multiple market conditions. Signal logic is proprietary and not included
+in this public repository.
 
-Position Sizing ($5,000 portfolio):
+Strategy overview:
+  - BUY when composite signal score meets threshold
+  - SELL after validated optimal hold period (fee-adjusted backtest)
+  - Position size scaled by signal conviction score
+  - Trades a curated coin universe (Large Cap + Mid Cap only)
+  - Capital management: max concurrent positions + minimum cash reserve
+
+Backtest results (fee-adjusted, 1yr):
+  - Return: +8.63%  |  Sharpe: 1.262  |  Win Rate: 86.7%  |  Max DD: -1.86%
+
+Position Sizing ($5,000 portfolio example):
   - Score 2: 5% of portfolio  = $250
   - Score 3: 8% of portfolio  = $400
   - Score 4: 12% of portfolio = $600
   - Max open positions: 6 (never more than 60% deployed)
-  - Min cash reserve: 40% always
+  - Min cash reserve: 40% always maintained
 
 Usage:
-  python3 crypto_autotrader.py --check-entries   # Run after scanner fires (00:30 UTC)
-  python3 crypto_autotrader.py --check-exits     # Run daily to close 3-day-old trades
+  python3 crypto_autotrader.py --check-entries   # Run after scanner fires
+  python3 crypto_autotrader.py --check-exits     # Run daily to close aged trades
   python3 crypto_autotrader.py --status          # Show open positions + P&L
   python3 crypto_autotrader.py --dry-run         # Simulate without executing
 
@@ -53,29 +61,28 @@ except ImportError:
 PORTFOLIO_SIZE    = 5000.0   # Total capital in USD
 MIN_CASH_RESERVE  = 0.40     # Always keep 40% cash
 MAX_POSITIONS     = 6        # Max concurrent open positions
-HOLD_DAYS         = 3        # Exit after N days
+HOLD_DAYS         = 3        # Exit after N days (validated via fee-adjusted backtest)
 
 POSITION_SIZE = {
-    2: 0.05,   # Score 2 → 5% of portfolio  = $250
-    3: 0.08,   # Score 3 → 8% of portfolio  = $400
-    4: 0.12,   # Score 4 → 12% of portfolio = $600
+    2: 0.05,   # Score 2 → 5% of portfolio
+    3: 0.08,   # Score 3 → 8% of portfolio
+    4: 0.12,   # Score 4 → 12% of portfolio
 }
 
-# Coins excluded (not on Coinbase)
+# Coins excluded from trading universe (exchange availability / data quality)
 EXCLUDED = {"GALA", "JUP", "KAS", "MKR", "RNDR", "TRX"}
 
-# Bucket mapping (from config.py)
+# Bucket definitions — only Large Cap and Mid Cap traded
+# Signal scoring validated to be statistically significant for these tiers only
+# Bucket assignments populated from config — see config_example.py
 BUCKET_MAP = {
-    "BTC": 1, "ETH": 1,
-    "BNB": 2, "SOL": 2, "XRP": 2, "ADA": 2, "DOGE": 2, "LINK": 2,
-    "AVAX": 2, "DOT": 2, "POL": 2, "SHIB": 2, "LTC": 2,
-    "UNI": 2, "XLM": 2, "NEAR": 2, "SUI": 2, "ICP": 2,
-    "AAVE": 3, "ARB": 3, "OP": 3, "INJ": 3, "SEI": 3, "TIA": 3,
-    "BONK": 3, "PEPE": 3, "FLOKI": 3, "WLD": 3, "STX": 3, "GRT": 3,
-    "IMX": 3, "FET": 3, "PENDLE": 3,
+    # Populated from config — see config_example.py
 }
 
 BUCKET_LABELS = {1: "Large Cap", 2: "Mid Cap", 3: "Smaller Alt"}
+
+# Smaller Alts (bucket 3) excluded — backtesting showed degraded signal quality
+EXCLUDED_BUCKETS = {3}
 
 # DB for tracking open positions
 TRADER_DB = os.path.join(os.path.dirname(__file__), "autotrader.db")
@@ -105,12 +112,9 @@ def load_cdp_key():
     private_key = os.environ.get("COINBASE_API_PRIVATE_KEY")
 
     if key_name and private_key:
-        # Replace literal \n with actual newlines in case the env var was set
-        # as a single line (common in some hosting environments)
         private_key = private_key.replace("\\n", "\n")
         return {"name": key_name, "privateKey": private_key}
 
-    # Fall back to JSON file
     if not os.path.exists(KEY_FILE):
         raise FileNotFoundError(
             "Coinbase credentials not found. Set COINBASE_API_KEY_NAME and "
@@ -119,6 +123,7 @@ def load_cdp_key():
         )
     with open(KEY_FILE) as f:
         return json.load(f)
+
 
 def build_jwt(method, path, cdp):
     private_key = load_pem_private_key(cdp["privateKey"].encode(), password=None)
@@ -136,6 +141,7 @@ def build_jwt(method, path, cdp):
         algorithm="ES256",
         headers={"kid": cdp["name"], "nonce": str(now)},
     )
+
 
 def cb_request(method, path, body=None):
     cdp = load_cdp_key()
@@ -246,7 +252,7 @@ def record_exit(position_id, exit_price, exit_order_id, dry_run=False):
 
 # ── Coinbase Market Data ──────────────────────────────────────────────────────
 def get_current_price(ticker):
-    """Get current mid price from Coinbase."""
+    """Get current mid price from Coinbase best bid/ask."""
     product_id = f"{ticker}-USD"
     try:
         data = cb_request("GET", f"/api/v3/brokerage/best_bid_ask?product_ids={product_id}")
@@ -280,6 +286,7 @@ def place_market_buy(ticker, usd_amount, dry_run=False):
     """
     Place a market buy order for $usd_amount of ticker.
     Returns (order_id, fill_price, quantity) or None on failure.
+    Uses IOC (Immediate-or-Cancel) market order via Coinbase Advanced Trade API.
     """
     product_id = f"{ticker}-USD"
     client_order_id = f"autotrader-buy-{ticker}-{int(time.time())}"
@@ -312,7 +319,6 @@ def place_market_buy(ticker, usd_amount, dry_run=False):
             print(f"  BUY FAILED {ticker}: {resp}")
             return None
 
-        # Poll for fill
         time.sleep(2)
         fill_data = cb_request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
         filled_order = fill_data.get("order", {})
@@ -388,8 +394,12 @@ def place_market_sell(ticker, quantity, dry_run=False):
 # ── Core Logic ────────────────────────────────────────────────────────────────
 def check_entries(dry_run=False):
     """
-    Read today's scanner signals and execute buys for Score ≥ 2.
-    Called at 00:45 UTC (15 min after scanner runs).
+    Read today's scanner signals and execute buys for qualifying scores.
+    Called at 00:45 UTC (15 min after scanner runs at 00:30 UTC).
+
+    Signal computation logic is in crypto_scanner.py (proprietary — not
+    included in this public repository). The scanner outputs a DataFrame
+    with columns: ticker, bucket, score, and supporting signal metrics.
     """
     import pandas as pd
 
@@ -398,25 +408,33 @@ def check_entries(dry_run=False):
     print(f"Mode: {'DRY RUN' if dry_run else 'LIVE'}")
     print("=" * 60)
 
-    # Update prices and Fear & Greed before scanning
-    from crypto_scanner import compute_signals, update_prices, update_fear_greed
-    from database import DB_PATH
-    print("Updating data...")
-    update_fear_greed()
-    update_prices()
-    signals = compute_signals()
+    # Signal computation redacted — proprietary scoring logic
+    # In production: imports compute_signals() from crypto_scanner.py
+    # Returns DataFrame with: ticker, bucket, score, ret_5d, vol_ratio, etc.
+    try:
+        from crypto_scanner import compute_signals, update_prices, update_fear_greed
+        from database import DB_PATH
+        print("Updating data...")
+        update_fear_greed()
+        update_prices()
+        signals = compute_signals()
+    except ImportError:
+        print("Signal module not available in public repo — see crypto_scanner.py")
+        return
+
     if signals.empty:
         print("No signals computed.")
         return
 
-    # Filter: Score ≥ 2, not excluded, not already in open positions
+    # Filter: qualifying score, not excluded, not already held, Large+Mid Cap only
     open_pos = get_open_positions()
     open_tickers = set(open_pos["ticker"].tolist()) if not open_pos.empty else set()
 
     buys = signals[
         (signals["score"] >= 2) &
         (~signals["ticker"].isin(EXCLUDED)) &
-        (~signals["ticker"].isin(open_tickers))
+        (~signals["ticker"].isin(open_tickers)) &
+        (~signals["bucket"].isin(EXCLUDED_BUCKETS))
     ].copy()
 
     if buys.empty:
@@ -454,16 +472,13 @@ def check_entries(dry_run=False):
         score = int(row["score"])
         bucket = int(row["bucket"])
 
-        # Check position cap
         if len(open_pos) + len(executed) >= MAX_POSITIONS:
             print(f"  {ticker}: skipped — max positions reached")
             break
 
-        # Position size
         size_pct = POSITION_SIZE.get(min(score, 4), POSITION_SIZE[2])
         usd_amount = PORTFOLIO_SIZE * size_pct
 
-        # Don't exceed available deployable capital
         if usd_amount > max_deployable:
             usd_amount = max_deployable
         if usd_amount < 1.0:
@@ -493,8 +508,9 @@ def check_entries(dry_run=False):
 
 def check_exits(dry_run=False):
     """
-    Check open positions and sell any that have held for HOLD_DAYS.
+    Check open positions and sell any held for HOLD_DAYS or longer.
     Called daily at 01:00 UTC.
+    Hold period validated via fee-adjusted multi-period Sharpe ratio analysis.
     """
     print("=" * 60)
     print(f"CHECK EXITS — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -558,7 +574,7 @@ def check_exits(dry_run=False):
 
 
 def show_status():
-    """Display current portfolio status and P&L summary."""
+    """Display current portfolio status, open positions, and closed trade summary."""
     import pandas as pd
 
     print("=" * 60)
@@ -627,7 +643,7 @@ def show_status():
         print("-" * 65)
         for _, row in df_closed.iterrows():
             entry_d = datetime.strptime(row["entry_date"], "%Y-%m-%d").date()
-            exit_d = datetime.strptime(row["exit_date"], "%Y-%m-%d").date()
+            exit_d  = datetime.strptime(row["exit_date"],  "%Y-%m-%d").date()
             days = (exit_d - entry_d).days
             dry_tag = " [DRY]" if row.get("dry_run") else ""
             print(f"{row['ticker']:<8} ${row['entry_price']:>9,.4f} "
@@ -644,6 +660,7 @@ def show_status():
 
 # ── Email Notification ────────────────────────────────────────────────────────
 def send_trade_email(subject, body):
+    """Send failure/alert email via Gmail SMTP."""
     if not EMAIL_ADDRESS or not EMAIL_APP_PASSWORD:
         return
     import smtplib
@@ -670,14 +687,14 @@ def send_trade_email(subject, body):
 def main():
     init_db()
 
-    parser = argparse.ArgumentParser(description="Crypto Auto-Trader")
+    parser = argparse.ArgumentParser(description="Crypto Auto-Trader — Coinbase Advanced Trade")
     parser.add_argument("--check-entries", action="store_true",
                         help="Execute buys for today's signals")
-    parser.add_argument("--check-exits", action="store_true",
-                        help="Close positions held 3+ days")
-    parser.add_argument("--status", action="store_true",
-                        help="Show open positions and P&L")
-    parser.add_argument("--dry-run", action="store_true",
+    parser.add_argument("--check-exits",   action="store_true",
+                        help="Close positions held HOLD_DAYS or longer")
+    parser.add_argument("--status",        action="store_true",
+                        help="Show open positions and P&L summary")
+    parser.add_argument("--dry-run",       action="store_true",
                         help="Simulate without placing real orders")
     args = parser.parse_args()
 
@@ -690,13 +707,16 @@ def main():
             show_status()
         else:
             parser.print_help()
+
     except Exception as e:
         import traceback
-        mode = "DRY RUN" if args.dry_run else "LIVE"
-        task = "check-entries" if args.check_entries else "check-exits" if args.check_exits else "unknown"
+        mode      = "DRY RUN" if args.dry_run else "LIVE"
+        task      = ("check-entries" if args.check_entries
+                     else "check-exits" if args.check_exits
+                     else "unknown")
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        subject = f"⚠️ Crypto Auto-Trader FAILED [{task}] {timestamp}"
-        body = (
+        subject   = f"⚠️ Crypto Auto-Trader FAILED [{task}] {timestamp}"
+        body      = (
             f"The crypto auto-trader crashed during {task} at {timestamp}.\n"
             f"Mode: {mode}\n\n"
             f"Error: {str(e)}\n\n"
@@ -705,7 +725,7 @@ def main():
         print(subject)
         print(body)
         send_trade_email(subject, body)
-        raise  # Re-raise so PA logs the error too
+        raise
 
 
 if __name__ == "__main__":
