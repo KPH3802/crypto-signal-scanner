@@ -80,7 +80,7 @@ BUCKET_LABELS = {1: "Large Cap", 2: "Mid Cap", 3: "Smaller Alt"}
 # DB for tracking open positions
 TRADER_DB = os.path.join(os.path.dirname(__file__), "autotrader.db")
 
-# CDP key file
+# CDP key file (fallback if env vars not set)
 KEY_FILE = os.path.join(os.path.dirname(__file__), "cdp_api_key.json")
 
 # Email (from config)
@@ -94,6 +94,29 @@ except ImportError:
 
 # ── Coinbase JWT Auth ─────────────────────────────────────────────────────────
 def load_cdp_key():
+    """
+    Load Coinbase CDP credentials.
+    Priority 1: Environment variables (preferred — no key file on disk)
+      COINBASE_API_KEY_NAME    — the 'name' field from cdp_api_key.json
+      COINBASE_API_PRIVATE_KEY — the full PEM private key string
+    Priority 2: cdp_api_key.json file (local dev fallback)
+    """
+    key_name    = os.environ.get("COINBASE_API_KEY_NAME")
+    private_key = os.environ.get("COINBASE_API_PRIVATE_KEY")
+
+    if key_name and private_key:
+        # Replace literal \n with actual newlines in case the env var was set
+        # as a single line (common in some hosting environments)
+        private_key = private_key.replace("\\n", "\n")
+        return {"name": key_name, "privateKey": private_key}
+
+    # Fall back to JSON file
+    if not os.path.exists(KEY_FILE):
+        raise FileNotFoundError(
+            "Coinbase credentials not found. Set COINBASE_API_KEY_NAME and "
+            "COINBASE_API_PRIVATE_KEY environment variables, or place "
+            "cdp_api_key.json in the project directory."
+        )
     with open(KEY_FILE) as f:
         return json.load(f)
 
@@ -658,14 +681,31 @@ def main():
                         help="Simulate without placing real orders")
     args = parser.parse_args()
 
-    if args.check_entries:
-        check_entries(dry_run=args.dry_run)
-    elif args.check_exits:
-        check_exits(dry_run=args.dry_run)
-    elif args.status:
-        show_status()
-    else:
-        parser.print_help()
+    try:
+        if args.check_entries:
+            check_entries(dry_run=args.dry_run)
+        elif args.check_exits:
+            check_exits(dry_run=args.dry_run)
+        elif args.status:
+            show_status()
+        else:
+            parser.print_help()
+    except Exception as e:
+        import traceback
+        mode = "DRY RUN" if args.dry_run else "LIVE"
+        task = "check-entries" if args.check_entries else "check-exits" if args.check_exits else "unknown"
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        subject = f"⚠️ Crypto Auto-Trader FAILED [{task}] {timestamp}"
+        body = (
+            f"The crypto auto-trader crashed during {task} at {timestamp}.\n"
+            f"Mode: {mode}\n\n"
+            f"Error: {str(e)}\n\n"
+            f"Full traceback:\n{traceback.format_exc()}"
+        )
+        print(subject)
+        print(body)
+        send_trade_email(subject, body)
+        raise  # Re-raise so PA logs the error too
 
 
 if __name__ == "__main__":
