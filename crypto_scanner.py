@@ -33,7 +33,7 @@ import smtplib
 import sqlite3
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -232,7 +232,7 @@ def update_fear_greed(db_path=DB_PATH):
 
     for entry in entries:
         ts = int(entry["timestamp"])
-        date_str = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+        date_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
         value = int(entry["value"])
         classification = entry["value_classification"]
 
