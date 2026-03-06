@@ -70,7 +70,8 @@ POSITION_SIZE = {
 }
 
 # Coins excluded from trading universe (exchange availability / data quality)
-EXCLUDED = {"GALA", "JUP", "KAS", "MKR", "RNDR", "TRX"}
+# POL = Polygon (rebranded from MATIC Oct 2023) — yfinance ticker broken post-rebrand
+EXCLUDED = {"GALA", "JUP", "KAS", "MKR", "POL", "RNDR", "TRX"}
 
 # Bucket definitions — only Large Cap and Mid Cap traded
 # Signal scoring validated to be statistically significant for these tiers only

@@ -50,13 +50,15 @@ Simulated performance starting with $5,000, running the full execution system ag
 - Minimum 40% cash reserve at all times
 - Market orders via Coinbase Advanced Trade API
 
-## Coin Universe (33 Coins — Coinbase Tradable)
+## Coin Universe (30 Coins — Coinbase Tradable)
 
 **Large Cap (2):** BTC, ETH
 
-**Mid Cap (16):** BNB, SOL, XRP, ADA, DOGE, LINK, AVAX, DOT, SHIB, LTC, UNI, XLM, NEAR, SUI, ICP, POL
+**Mid Cap (15):** BNB, SOL, XRP, ADA, DOGE, LINK, AVAX, DOT, SHIB, LTC, XLM, NEAR, SUI, ICP
 
-**Smaller Alt (15):** AAVE, ARB, OP, INJ, SEI, TIA, BONK, PEPE, FLOKI, WLD, STX, GRT, IMX, FET, PENDLE
+**Smaller Alt (13):** AAVE, ARB, OP, INJ, SEI, BONK, PEPE, FLOKI, WLD, GRT, IMX, FET, PENDLE
+
+**Excluded (data quality / exchange issues):** POL (broken ticker post-MATIC rebrand), STX, TIA, UNI (corrupt yfinance data), GALA, JUP, KAS, MKR, RNDR, TRX
 
 ## Project Structure
 
@@ -69,6 +71,8 @@ crypto_backtest/
 ├── backtest_engine.py       # Individual signal backtester
 ├── signal_dedup.py          # Signal overlap & combined scoring
 ├── signal_refine.py         # Holding period, OOS, risk analysis
+├── validate_crypto_db.py    # Proactive data corruption scanner (5 checks)
+├── purge_corrupt_rows.py    # Targeted purge of known corrupt rows
 ├── check_coinbase_universe.py # Validates tradable coin universe via CDP API
 ├── database.py              # SQLite schema and utilities
 ├── config_example.py        # Configuration template (copy to config.py)
@@ -135,6 +139,26 @@ python3 backtest_autotrader.py --start 2026-01-01 --end 2026-03-02
 00:45 UTC — python3 crypto_autotrader.py --check-entries
 01:00 UTC — python3 crypto_autotrader.py --check-exits
 ```
+
+## Data Integrity
+
+The database includes a proactive corruption scanner that runs 5 checks on every update:
+
+| Check | What It Catches |
+|-------|-----------------|
+| Price spikes > 200% | Launch artifact placeholders, corrupt yfinance rows |
+| Near-zero prices (coin-relative) | Pre-launch placeholder rows (e.g. OP before May 2022 launch) |
+| Zero / NULL / negative prices | Bad API responses |
+| Duplicate rows | Double-inserts from collect_data.py retries |
+| Stale coins | Tickers that stopped updating (yfinance failures) |
+
+```bash
+python3 validate_crypto_db.py                     # Scan and report
+python3 validate_crypto_db.py --purge             # Scan and auto-purge safe rows
+python3 validate_crypto_db.py --output report.txt # Save report to file
+```
+
+Known corrupt data found and removed Mar 2026: 1,700+ rows across GRT (impossible prices above ATH), POL (dead ticker), OP (pre-launch placeholders), and a bad yfinance pull window across 5 coins.
 
 ## Backtest Methodology
 
