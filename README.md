@@ -8,7 +8,7 @@ Daily signal scanner and automated execution system for cryptocurrency markets u
 |--------|-------|-------------------|----------|
 | Score ≥ 2 (BUY) | +2 | +6.90% | 57.7% |
 | Score ≥ 3 (STRONG) | +3 | +8.72% | 58.9% |
-| Score ≥ 4 (VERY STRONG) | +4 | +19.51% | 67.9% |
+| Score ≥ 4 (VERY STRONG, filtered) | +4 | +9.96% | 71.6% |
 
 - **Long-only**, 3-day hold period
 - **Out-of-sample validated**: +7.27% alpha (2022–2026), significant every year
@@ -25,6 +25,8 @@ Daily signal scanner and automated execution system for cryptocurrency markets u
 | Capitulation | +1 | 3x volume + 5%+ daily drop |
 | Low volatility | -1 | Coin in own bottom 10th percentile |
 | Fear exit | -2 | Fear & Greed crosses above 25 |
+
+**Score 4 Quality Filter (validated Mar 2026):** Score 4 requires severe crash (≥-25%) **plus** extreme greed (F&G ≥ 90) **or** capitulation. Severe crash + greed zone only → 47.6% win rate (coin flip) → downgraded to Score 3. Filtered Score 4: +9.96% alpha, 71.6% win rate vs +7.75%/62.4% unfiltered.
 
 ## Auto-Trader: Historical Simulation Results
 
