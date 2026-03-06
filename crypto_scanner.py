@@ -7,7 +7,7 @@ Strategy (validated OOS 2022-2026, +7.27% alpha at 5d, p<0.0001):
   - Long-only, 3-5 day hold
   - Score ≥ 2 = BUY signal (+6.90% alpha, 57.7% win rate)
   - Score ≥ 3 = STRONG BUY (+8.72% alpha, 58.9% win rate)
-  - Score ≥ 4 = VERY STRONG (+19.51% alpha, 67.9% win rate)
+  - Score ≥ 4 = VERY STRONG (+9.96% alpha, 71.6% win rate, filtered)
 
 Scoring:
   +3: 5d drawdown ≥ 25% (crash family)
@@ -17,6 +17,11 @@ Scoring:
   +1: Capitulation (3x volume + 5%+ daily drop)
   -1: Low volatility (coin's own bottom 10th percentile)
   -2: Fear Exit (FG crosses above 25 from below)
+
+Score 4 quality filter (validated Mar 2026):
+  Score 4 requires severe crash (≥-25%) PLUS extreme greed (FG ≥ 90) OR capitulation.
+  Severe crash + greed zone only → 47.6% win rate (coin flip) → capped at Score 3.
+  Filtered Score 4: +9.96% alpha, 71.6% win rate (vs +7.75%/62.4% unfiltered).
 
 Schedule: Run daily after market close (e.g., 00:30 UTC)
 Requires: Database with ≥20 days of history per coin
@@ -392,9 +397,15 @@ def compute_signals(db_path=DB_PATH):
         score = 0
         reasons = []
 
+        # Component flags (used for Score 4 quality filter below)
+        severe_crash_fired  = False
+        extreme_greed_fired = False
+        capitulation_fired  = False
+
         # Crash family
         if ret_5d <= -25:
             score += 3
+            severe_crash_fired = True
             reasons.append(f"5d DD ≥25% ({ret_5d:+.1f}%): +3")
         elif ret_5d <= -15:
             score += 1
@@ -404,6 +415,7 @@ def compute_signals(db_path=DB_PATH):
         if fg_today is not None:
             if fg_today >= 90:
                 score += 2
+                extreme_greed_fired = True
                 reasons.append(f"Extreme Greed FG={fg_today}: +2")
             elif fg_today >= 75:
                 score += 1
@@ -412,6 +424,7 @@ def compute_signals(db_path=DB_PATH):
         # Capitulation (3x volume + 5%+ daily drop)
         if vol_ratio >= 3.0 and ret_1d <= -5:
             score += 1
+            capitulation_fired = True
             reasons.append(f"Capitulation (vol {vol_ratio:.1f}x, 1d {ret_1d:+.1f}%): +1")
 
         # Anti-signals
@@ -425,6 +438,13 @@ def compute_signals(db_path=DB_PATH):
             score -= 1
             reasons.append(f"Low Vol (own {vol_pctile:.0f}th pctile, "
                            f"vol={vol_20d:.0f}%): -1")
+
+        # Score 4 quality filter (validated Mar 2026):
+        # Severe crash + greed zone only shows 47.6% win rate (coin flip).
+        # Require extreme greed (FG ≥ 90) OR capitulation alongside crash for Score 4.
+        if score == 4 and severe_crash_fired and not extreme_greed_fired and not capitulation_fired:
+            score = 3
+            reasons.append("Score 4→3 filter: severe crash + greed zone only (47.6% win rate)")
 
         results.append({
             "ticker": ticker,
