@@ -73,6 +73,7 @@ crypto_backtest/
 ├── signal_refine.py         # Holding period, OOS, risk analysis
 ├── validate_crypto_db.py    # Proactive data corruption scanner (5 checks)
 ├── purge_corrupt_rows.py    # Targeted purge of known corrupt rows
+├── regime_backtest.py       # Phase 2: HV regime vs hold window research (answered: 3d fixed optimal)
 ├── check_coinbase_universe.py # Validates tradable coin universe via CDP API
 ├── database.py              # SQLite schema and utilities
 ├── config_example.py        # Configuration template (copy to config.py)

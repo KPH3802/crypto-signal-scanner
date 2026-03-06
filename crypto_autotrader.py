@@ -134,7 +134,7 @@ def build_jwt(method, path, cdp):
         "iss": "cdp",
         "nbf": now,
         "exp": now + 120,
-        "uri": f"{method} api.coinbase.com{path}",
+        "uri": f"{method} api.coinbase.com{_strip_query(path)}",
     }
     return pyjwt.encode(
         payload,
@@ -142,6 +142,11 @@ def build_jwt(method, path, cdp):
         algorithm="ES256",
         headers={"kid": cdp["name"], "nonce": str(now)},
     )
+
+
+def _strip_query(path):
+    """Strip query string from path for JWT URI claim."""
+    return path.split("?")[0]
 
 
 def cb_request(method, path, body=None):
