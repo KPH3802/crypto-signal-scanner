@@ -702,6 +702,13 @@ def main():
     else:
         print("  No actionable signals today.")
 
+    if len(watches) > 0:
+        print(f"\n  Watch ({len(watches)}):")
+        for _, row in watches.iterrows():
+            reasons_str = " | ".join(row["reasons"]) if row["reasons"] else ""
+            print(f"    {row['ticker']:<8} 5d: {row['ret_5d']:>+.1f}%  "
+                  f"${row['price']:>10,.2f}  ({reasons_str})")
+
     if len(avoids) > 0:
         print(f"\n  Avoid ({len(avoids)}):")
         for _, row in avoids.iterrows():
