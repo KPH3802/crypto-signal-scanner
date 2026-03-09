@@ -165,6 +165,32 @@ def cb_request(method, path, body=None):
     return r.json()
 
 
+# ── Coinbase Account Balance ──────────────────────────────────────────────────
+def get_account_balance():
+    """
+    Pull live USD cash balance from Coinbase Advanced Trade API.
+    Returns float balance, or falls back to PORTFOLIO_SIZE if API fails.
+    Only counts the USD (cash) account — not crypto holdings.
+    """
+    try:
+        data = cb_request("GET", "/api/v3/brokerage/accounts")
+        accounts = data.get("accounts", [])
+        for account in accounts:
+            currency = account.get("currency", "")
+            if currency == "USD":
+                available = float(account.get("available_balance", {}).get("value", 0))
+                hold = float(account.get("hold", {}).get("value", 0))
+                total = available + hold
+                print(f"  Coinbase USD balance: ${total:,.2f} "
+                      f"(${available:,.2f} available, ${hold:,.2f} on hold)")
+                return total
+        print(f"  WARNING: No USD account found — falling back to ${PORTFOLIO_SIZE:,.0f}")
+        return PORTFOLIO_SIZE
+    except Exception as e:
+        print(f"  WARNING: Balance fetch failed ({e}) — falling back to ${PORTFOLIO_SIZE:,.0f}")
+        return PORTFOLIO_SIZE
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect(TRADER_DB)
@@ -453,14 +479,16 @@ def check_entries(dry_run=False):
         print(f"  {row['ticker']:<8} Score {row['score']:+.0f}  {bucket_label}  "
               f"5d: {row['ret_5d']:+.1f}%")
 
-    # Capital check
+    # Capital check — pull live balance from Coinbase
+    print("\nFetching live portfolio balance...")
+    portfolio_size = get_account_balance() if not dry_run else PORTFOLIO_SIZE
     deployed = get_deployed_capital()
-    available = PORTFOLIO_SIZE - deployed
-    max_deployable = PORTFOLIO_SIZE * (1 - MIN_CASH_RESERVE) - deployed
+    available = portfolio_size - deployed
+    max_deployable = portfolio_size * (1 - MIN_CASH_RESERVE) - deployed
     n_open = len(open_pos)
 
-    print(f"\nCapital: ${PORTFOLIO_SIZE:,.0f} total | "
-          f"${deployed:,.0f} deployed | ${available:,.0f} available")
+    print(f"\nCapital: ${portfolio_size:,.2f} total | "
+          f"${deployed:,.2f} deployed | ${available:,.2f} available")
     print(f"Positions: {n_open}/{MAX_POSITIONS} open")
 
     if n_open >= MAX_POSITIONS:
@@ -483,7 +511,7 @@ def check_entries(dry_run=False):
             break
 
         size_pct = POSITION_SIZE.get(min(score, 4), POSITION_SIZE[2])
-        usd_amount = PORTFOLIO_SIZE * size_pct
+        usd_amount = portfolio_size * size_pct
 
         if usd_amount > max_deployable:
             usd_amount = max_deployable
@@ -625,9 +653,11 @@ def show_status():
                   f"{days_held:>5}{dry_tag}")
             deployed += pos["usd_value"]
 
-        available = PORTFOLIO_SIZE - deployed
-        print(f"\nCapital: ${PORTFOLIO_SIZE:,.0f} total | "
-              f"${deployed:,.0f} deployed | ${available:,.0f} available")
+        print("\nFetching live portfolio balance...")
+        live_balance = get_account_balance()
+        available = live_balance - deployed
+        print(f"\nCapital: ${live_balance:,.2f} total | "
+              f"${deployed:,.2f} deployed | ${available:,.2f} available")
 
     # Closed trade summary
     conn = sqlite3.connect(TRADER_DB)
@@ -689,6 +719,125 @@ def send_trade_email(subject, body):
         print(f"Email failed: {e}")
 
 
+# ── Daily Status Email ────────────────────────────────────────────────────────
+def send_status_email():
+    """
+    Build and send a daily morning portfolio status email.
+    Shows open positions, unrealized P&L, days until exit, and cash available.
+    Scheduled at 08:00 UTC daily.
+    """
+    import pandas as pd
+
+    today = datetime.now(timezone.utc).date()
+    today_str = today.strftime("%Y-%m-%d")
+
+    open_pos = get_open_positions()
+    n_open = len(open_pos)
+
+    # Pull live balance
+    live_balance = get_account_balance()
+    deployed = get_deployed_capital()
+    available = live_balance - deployed
+    cash_pct = (available / live_balance * 100) if live_balance > 0 else 0
+
+    lines = []
+    lines.append("=" * 60)
+    lines.append(f"CRYPTO AUTO-TRADER — DAILY STATUS")
+    lines.append(f"{today_str} 08:00 UTC")
+    lines.append("=" * 60)
+    lines.append(f"Portfolio:  ${live_balance:,.2f} total")
+    lines.append(f"Deployed:   ${deployed:,.2f}")
+    lines.append(f"Cash:       ${available:,.2f} ({cash_pct:.1f}%)")
+    lines.append(f"Positions:  {n_open}/{MAX_POSITIONS} open")
+    lines.append("")
+
+    total_unrealized = 0.0
+
+    if open_pos.empty:
+        lines.append("No open positions.")
+    else:
+        lines.append("-" * 60)
+        lines.append("OPEN POSITIONS")
+        lines.append("-" * 60)
+
+        for _, pos in open_pos.iterrows():
+            ticker = pos["ticker"]
+            entry_date = datetime.strptime(pos["entry_date"], "%Y-%m-%d").date()
+            days_held = (today - entry_date).days
+            days_left = max(0, HOLD_DAYS - days_held)
+
+            current_price = get_current_price(ticker)
+            if current_price:
+                unreal_usd = (current_price - pos["entry_price"]) * pos["quantity"]
+                unreal_pct = (current_price / pos["entry_price"] - 1) * 100
+                total_unrealized += unreal_usd
+                price_str   = f"${current_price:,.4f}"
+                pnl_str     = f"${unreal_usd:+,.2f} ({unreal_pct:+.1f}%)"
+            else:
+                price_str = "N/A"
+                pnl_str   = "N/A"
+
+            dry_tag = " [DRY]" if pos.get("dry_run") else ""
+            exit_str = "EXIT TODAY" if days_left == 0 else f"{days_left}d until exit"
+
+            lines.append(f"  {ticker:<6} Score {pos['score']:+d} | "
+                         f"Entry ${pos['entry_price']:,.4f} | "
+                         f"Now {price_str} | "
+                         f"P&L {pnl_str}{dry_tag}")
+            lines.append(f"         Held {days_held}d | {exit_str} | "
+                         f"{pos['bucket_label']}")
+            lines.append("")
+
+        lines.append(f"Total unrealized P&L: ${total_unrealized:+,.2f}")
+
+    # Closed trade summary (last 30 days)
+    conn = sqlite3.connect(TRADER_DB)
+    df_closed = pd.read_sql_query(
+        "SELECT * FROM positions WHERE status = 'CLOSED' ORDER BY exit_date DESC",
+        conn
+    )
+    conn.close()
+
+    if not df_closed.empty:
+        total_pnl = df_closed["pnl_usd"].sum()
+        wins = len(df_closed[df_closed["pnl_usd"] > 0])
+        losses = len(df_closed[df_closed["pnl_usd"] <= 0])
+        win_rate = wins / len(df_closed) * 100
+
+        lines.append("")
+        lines.append("-" * 60)
+        lines.append(f"CLOSED TRADES SUMMARY ({len(df_closed)} total)")
+        lines.append("-" * 60)
+        lines.append(f"  Win rate:  {win_rate:.1f}% ({wins}W / {losses}L)")
+        lines.append(f"  Total P&L: ${total_pnl:+,.2f}")
+
+        # Last 5 closed trades
+        lines.append("")
+        lines.append("  Recent closes:")
+        for _, row in df_closed.head(5).iterrows():
+            dry_tag = " [DRY]" if row.get("dry_run") else ""
+            lines.append(f"    {row['ticker']:<6} {row['exit_date']}  "
+                         f"${row['pnl_usd']:>+8.2f} ({row['pnl_pct']:>+.1f}%){dry_tag}")
+
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("Next scheduled checks: entries 00:45 UTC | exits 01:00 UTC")
+
+    body = "\n".join(lines)
+
+    # Subject line
+    if n_open > 0:
+        subject = (f"📊 Crypto Trader Status: {n_open} open | "
+                   f"P&L ${total_unrealized:+,.2f} | "
+                   f"Cash ${available:,.0f}")
+    else:
+        subject = f"📊 Crypto Trader Status: No open positions | Cash ${available:,.0f}"
+
+    print(body)
+    send_trade_email(subject, body)
+    print(f"\nStatus email sent: {subject}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     init_db()
@@ -700,8 +849,8 @@ def main():
                         help="Close positions held HOLD_DAYS or longer")
     parser.add_argument("--status",        action="store_true",
                         help="Show open positions and P&L summary")
-    parser.add_argument("--dry-run",       action="store_true",
-                        help="Simulate without placing real orders")
+    parser.add_argument("--daily-status",  action="store_true",
+                        help="Send daily status email (scheduled 08:00 UTC)")
     args = parser.parse_args()
 
     try:
@@ -711,6 +860,8 @@ def main():
             check_exits(dry_run=args.dry_run)
         elif args.status:
             show_status()
+        elif args.daily_status:
+            send_status_email()
         else:
             parser.print_help()
 

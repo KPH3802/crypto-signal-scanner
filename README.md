@@ -124,6 +124,7 @@ python3 crypto_autotrader.py --dry-run --check-exits     # Simulate exits (no re
 python3 crypto_autotrader.py --check-entries             # Live entry execution
 python3 crypto_autotrader.py --check-exits               # Live exit execution
 python3 crypto_autotrader.py --status                    # Show open positions + P&L
+python3 crypto_autotrader.py --daily-status              # Send daily status email
 ```
 
 Place `cdp_api_key.json` (Coinbase Developer Platform key with trade + view permissions) in the project root. This file is excluded from version control.
@@ -141,6 +142,7 @@ python3 backtest_autotrader.py --start 2026-01-01 --end 2026-03-02
 00:30 UTC — python3 crypto_scanner.py
 00:45 UTC — python3 crypto_autotrader.py --check-entries
 01:00 UTC — python3 crypto_autotrader.py --check-exits
+08:00 UTC — python3 crypto_autotrader.py --daily-status
 ```
 
 ## Data Integrity
