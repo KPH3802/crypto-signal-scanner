@@ -851,6 +851,8 @@ def main():
                         help="Show open positions and P&L summary")
     parser.add_argument("--daily-status",  action="store_true",
                         help="Send daily status email (scheduled 08:00 UTC)")
+    parser.add_argument("--dry-run",       action="store_true",
+                        help="Simulate without executing real trades")
     args = parser.parse_args()
 
     try:
