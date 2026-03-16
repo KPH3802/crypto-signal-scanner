@@ -168,23 +168,37 @@ def cb_request(method, path, body=None):
 # ── Coinbase Account Balance ──────────────────────────────────────────────────
 def get_account_balance():
     """
-    Pull live USD cash balance from Coinbase Advanced Trade API.
+    Pull live USD/USDC cash balance from Coinbase Advanced Trade API.
     Returns float balance, or falls back to PORTFOLIO_SIZE if API fails.
-    Only counts the USD (cash) account — not crypto holdings.
+    Counts both USD (cash) and USDC (stablecoin) — not crypto holdings.
+    USDC earns yield while idle and is treated as equivalent to USD.
     """
     try:
         data = cb_request("GET", "/api/v3/brokerage/accounts")
         accounts = data.get("accounts", [])
+        usd_total = 0.0
+        usdc_total = 0.0
+        found_any = False
         for account in accounts:
             currency = account.get("currency", "")
-            if currency == "USD":
-                available = float(account.get("available_balance", {}).get("value", 0))
-                hold = float(account.get("hold", {}).get("value", 0))
-                total = available + hold
-                print(f"  Coinbase USD balance: ${total:,.2f} "
+            available = float(account.get("available_balance", {}).get("value", 0))
+            hold = float(account.get("hold", {}).get("value", 0))
+            total = available + hold
+            if currency == "USD" and total > 0:
+                usd_total = total
+                found_any = True
+                print(f"  Coinbase USD balance:  ${total:,.2f} "
                       f"(${available:,.2f} available, ${hold:,.2f} on hold)")
-                return total
-        print(f"  WARNING: No USD account found — falling back to ${PORTFOLIO_SIZE:,.0f}")
+            elif currency == "USDC" and total > 0:
+                usdc_total = total
+                found_any = True
+                print(f"  Coinbase USDC balance: ${total:,.2f} "
+                      f"(${available:,.2f} available, ${hold:,.2f} on hold)")
+        if found_any:
+            combined = usd_total + usdc_total
+            print(f"  Combined cash (USD + USDC): ${combined:,.2f}")
+            return combined
+        print(f"  WARNING: No USD or USDC account found — falling back to ${PORTFOLIO_SIZE:,.0f}")
         return PORTFOLIO_SIZE
     except Exception as e:
         print(f"  WARNING: Balance fetch failed ({e}) — falling back to ${PORTFOLIO_SIZE:,.0f}")
