@@ -813,25 +813,46 @@ def send_status_email():
     conn.close()
 
     if not df_closed.empty:
-        total_pnl = df_closed["pnl_usd"].sum()
-        wins = len(df_closed[df_closed["pnl_usd"] > 0])
-        losses = len(df_closed[df_closed["pnl_usd"] <= 0])
-        win_rate = wins / len(df_closed) * 100
+        df_live = df_closed[df_closed["dry_run"] == 0]
+        df_dry  = df_closed[df_closed["dry_run"] == 1]
 
+        # ── Live trades summary ──
         lines.append("")
         lines.append("-" * 60)
-        lines.append(f"CLOSED TRADES SUMMARY ({len(df_closed)} total)")
+        lines.append(f"LIVE TRADES SUMMARY ({len(df_live)} total)")
         lines.append("-" * 60)
-        lines.append(f"  Win rate:  {win_rate:.1f}% ({wins}W / {losses}L)")
-        lines.append(f"  Total P&L: ${total_pnl:+,.2f}")
+        if df_live.empty:
+            lines.append("  No live trades closed yet.")
+        else:
+            live_pnl   = df_live["pnl_usd"].sum()
+            live_wins  = len(df_live[df_live["pnl_usd"] > 0])
+            live_losses= len(df_live[df_live["pnl_usd"] <= 0])
+            live_wr    = live_wins / len(df_live) * 100
+            lines.append(f"  Win rate:  {live_wr:.1f}% ({live_wins}W / {live_losses}L)")
+            lines.append(f"  Total P&L: ${live_pnl:+,.2f}")
+            lines.append("")
+            lines.append("  Recent closes:")
+            for _, row in df_live.head(5).iterrows():
+                lines.append(f"    {row['ticker']:<6} {row['exit_date']}  "
+                             f"${row['pnl_usd']:>+8.2f} ({row['pnl_pct']:>+.1f}%)")
 
-        # Last 5 closed trades
-        lines.append("")
-        lines.append("  Recent closes:")
-        for _, row in df_closed.head(5).iterrows():
-            dry_tag = " [DRY]" if row.get("dry_run") else ""
-            lines.append(f"    {row['ticker']:<6} {row['exit_date']}  "
-                         f"${row['pnl_usd']:>+8.2f} ({row['pnl_pct']:>+.1f}%){dry_tag}")
+        # ── Dry-run trades summary ──
+        if not df_dry.empty:
+            dry_pnl   = df_dry["pnl_usd"].sum()
+            dry_wins  = len(df_dry[df_dry["pnl_usd"] > 0])
+            dry_losses= len(df_dry[df_dry["pnl_usd"] <= 0])
+            dry_wr    = dry_wins / len(df_dry) * 100
+            lines.append("")
+            lines.append("-" * 60)
+            lines.append(f"PAPER TRADES SUMMARY ({len(df_dry)} total) [DRY RUN]")
+            lines.append("-" * 60)
+            lines.append(f"  Win rate:  {dry_wr:.1f}% ({dry_wins}W / {dry_losses}L)")
+            lines.append(f"  Total P&L: ${dry_pnl:+,.2f}  (simulated, not real)")
+            lines.append("")
+            lines.append("  Recent closes:")
+            for _, row in df_dry.head(5).iterrows():
+                lines.append(f"    {row['ticker']:<6} {row['exit_date']}  "
+                             f"${row['pnl_usd']:>+8.2f} ({row['pnl_pct']:>+.1f}%) [DRY]")
 
     lines.append("")
     lines.append("=" * 60)

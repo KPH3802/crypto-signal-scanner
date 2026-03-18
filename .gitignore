@@ -22,3 +22,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+hold_window_optimizer.py
+price_path_analysis.py
+remove_stx_uni_from_db.py
+*.txt

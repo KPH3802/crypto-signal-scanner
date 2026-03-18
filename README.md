@@ -1,196 +1,87 @@
-# Crypto Signal Scanner & Auto-Trader
+# Crypto Backtest System — Phase 1: Data Collection
 
-Daily signal scanner and automated execution system for cryptocurrency markets using a composite scoring system validated across 12 years of data (2014–2026). Identifies high-probability long entries based on crash signals, sentiment extremes, and volume anomalies — and executes trades automatically via Coinbase Advanced Trade API.
+## What This Does
+Collects historical data from free APIs into a SQLite database for crypto signal backtesting.
 
-## Strategy Summary
+**40 coins across 3 buckets:**
+- Bucket 1 (Blue Chips): BTC, ETH
+- Bucket 2 (Top 20): BNB, SOL, XRP, ADA, DOGE, TRX, LINK, AVAX, DOT, POL, SHIB, TON, LTC, UNI, XLM, NEAR, SUI, ICP
+- Bucket 3 (Altcoins): AAVE, ARB, OP, RNDR, INJ, SEI, TIA, JUP, BONK, PEPE, FLOKI, WLD, KAS, STX, MKR, GRT, IMX, GALA, FET, PENDLE
 
-| Signal | Score | Backtest Alpha (5d) | Win Rate |
-|--------|-------|-------------------|----------|
-| Score ≥ 2 (BUY) | +2 | +6.90% | 57.7% |
-| Score ≥ 3 (STRONG) | +3 | +8.72% | 58.9% |
-| Score ≥ 4 (VERY STRONG, filtered) | +4 | +9.96% | 71.6% |
-
-- **Long-only**, 3-day hold period
-- **Out-of-sample validated**: +7.27% alpha (2022–2026), significant every year
-- **33-coin tradable universe**: Coinbase-listed coins across 3 buckets
-
-## Scoring System
-
-| Component | Points | Condition |
-|-----------|--------|-----------|
-| Severe crash | +3 | 5-day drawdown ≥ 25% |
-| Extreme Greed | +2 | Fear & Greed Index ≥ 90 |
-| Moderate crash | +1 | 5-day drawdown 15–25% |
-| Greed zone | +1 | Fear & Greed 75–89 |
-| Capitulation | +1 | 3x volume + 5%+ daily drop |
-| Low volatility | -1 | Coin in own bottom 10th percentile |
-| Fear exit | -2 | Fear & Greed crosses above 25 |
-
-**Score 4 Quality Filter (validated Mar 2026):** Score 4 requires severe crash (≥-25%) **plus** extreme greed (F&G ≥ 90) **or** capitulation. Severe crash + greed zone only → 47.6% win rate (coin flip) → downgraded to Score 3. Filtered Score 4: +9.96% alpha, 71.6% win rate vs +7.75%/62.4% unfiltered.
-
-## Auto-Trader: Historical Simulation Results
-
-Simulated performance starting with $5,000, running the full execution system against historical data:
-
-| Period | Return | BTC Buy-and-Hold | Alpha vs BTC | Win Rate | Max DD |
-|--------|--------|-----------------|--------------|----------|--------|
-| YTD (Jan–Mar 2026, 61d) | +2.93% | -22.49% | +25.42% | 66.7% | -2.00% |
-| 6 Month (Sep 2025–Mar 2026, 182d) | +5.75% | -38.15% | +43.90% | 68.4% | -4.02% |
-| 1 Year (Mar 2025–Mar 2026, 366d) | +16.07% | -27.03% | +43.10% | 67.9% | -30.25% |
-
-**Win rate is consistent across all three windows (67–68%).**
-
-## Position Sizing
-
-| Score | Position Size | $ on $5K |
-|-------|-------------|----------|
-| 2 | 5% | $250 |
-| 3 | 8% | $400 |
-| 4 | 12% | $600 |
-
-- Max 6 concurrent positions
-- Minimum 40% cash reserve at all times
-- Market orders via Coinbase Advanced Trade API
-
-## Coin Universe (30 Coins — Coinbase Tradable)
-
-**Large Cap (2):** BTC, ETH
-
-**Mid Cap (15):** BNB, SOL, XRP, ADA, DOGE, LINK, AVAX, DOT, SHIB, LTC, XLM, NEAR, SUI, ICP
-
-**Smaller Alt (13):** AAVE, ARB, OP, INJ, SEI, BONK, PEPE, FLOKI, WLD, GRT, IMX, FET, PENDLE
-
-**Excluded (data quality / exchange issues):** POL (broken ticker post-MATIC rebrand), STX, TIA, UNI (corrupt yfinance data), GALA, JUP, KAS, MKR, RNDR, TRX
-
-## Project Structure
-
-```
-crypto_backtest/
-├── crypto_scanner.py        # Live daily scanner with email alerts (00:30 UTC)
-├── crypto_autotrader.py     # Automated execution via Coinbase API (00:45/01:00 UTC)
-├── backtest_autotrader.py   # Historical simulation of full auto-trader system
-├── collect_data.py          # Historical data collection (yfinance, F&G)
-├── backtest_engine.py       # Individual signal backtester
-├── signal_dedup.py          # Signal overlap & combined scoring
-├── signal_refine.py         # Holding period, OOS, risk analysis
-├── validate_crypto_db.py    # Proactive data corruption scanner (5 checks)
-├── purge_corrupt_rows.py    # Targeted purge of known corrupt rows
-├── regime_backtest.py       # Phase 2: HV regime vs hold window research (answered: 3d fixed optimal)
-├── check_coinbase_universe.py # Validates tradable coin universe via CDP API
-├── database.py              # SQLite schema and utilities
-├── config_example.py        # Configuration template (copy to config.py)
-└── config.py                # Local credentials — NOT tracked
-```
+**3 data sources:**
+1. **CoinGecko** — Daily prices, market cap, volume. Free tier, 30 calls/min. Full history back to coin launch.
+2. **Alternative.me** — Crypto Fear & Greed Index. Free, no key needed. Daily since Feb 2018.
+3. **Binance** — Perpetual futures funding rates (every 8 hours). Free, no key needed. 23 symbols.
 
 ## Setup
 
-### 1. Clone and configure
-
 ```bash
-git clone https://github.com/KPH3802/crypto-signal-scanner.git
-cd crypto-signal-scanner
+# 1. Create project directory
+mkdir -p ~/Desktop/Claude_Programs/Trading_Programs/crypto_backtest
+cd ~/Desktop/Claude_Programs/Trading_Programs/crypto_backtest
+
+# 2. Copy all files into this directory
+
+# 3. Copy config_example.py to config.py
 cp config_example.py config.py
+
+# 4. Get your FREE CoinGecko API key:
+#    Go to https://www.coingecko.com/en/api/pricing
+#    Click "Create Free Account" → Developer Dashboard → "+ Add New Key"
+#    Paste the key into config.py on the COINGECKO_API_KEY line
+
+# 5. Edit config.py with your email credentials (for future alerts)
+
+# 6. Install dependencies (just requests, likely already installed)
+pip3 install requests
 ```
 
-Edit `config.py` with your Gmail App Password and email address.
-
-### 2. Install dependencies
+## Running
 
 ```bash
-pip install yfinance pandas numpy scipy requests PyJWT cryptography
-```
+cd ~/Desktop/Claude_Programs/Trading_Programs/crypto_backtest
 
-### 3. Build the database
-
-```bash
+# Collect everything (prices + fear/greed + funding rates)
+# Prices: ~40 coins × ~2.4 sec each = ~2 minutes
+# Funding: ~23 symbols = ~2 minutes
+# Total: ~5 minutes first run
 python3 collect_data.py --all
+
+# Or collect individually:
+python3 collect_data.py --prices        # CoinGecko daily prices only
+python3 collect_data.py --fear-greed    # Fear & Greed only
+python3 collect_data.py --funding       # Binance funding rates only
+
+# Check what's in the database:
+python3 collect_data.py --stats
 ```
 
-Pulls full price history (yfinance) and Fear & Greed Index (alternative.me). No paid API keys required for the scanner.
+## Incremental Updates
+The collector is incremental — running it again only fetches new data since the last collection. Safe to run daily.
 
-### 4. Run the scanner
-
-```bash
-python3 crypto_scanner.py              # Full run: update + scan + email
-python3 crypto_scanner.py --scan-only  # Scan existing data only
-python3 crypto_scanner.py --no-email   # Run without sending email
+## Expected Output (First Run)
+```
+DAILY PRICES: ~50,000-80,000 records (varies by coin age)
+FEAR & GREED: ~2,500+ days (since Feb 2018)
+FUNDING RATES: ~50,000+ records (since Binance perpetuals launch)
 ```
 
-### 5. Run the auto-trader (requires Coinbase CDP API key)
-
-```bash
-python3 crypto_autotrader.py --dry-run --check-entries   # Simulate entries (no real trades)
-python3 crypto_autotrader.py --dry-run --check-exits     # Simulate exits (no real trades)
-python3 crypto_autotrader.py --check-entries             # Live entry execution
-python3 crypto_autotrader.py --check-exits               # Live exit execution
-python3 crypto_autotrader.py --status                    # Show open positions + P&L
-python3 crypto_autotrader.py --daily-status              # Send daily status email
+## File Structure
+```
+crypto_backtest/
+├── config_example.py      # Configuration template (safe for GitHub)
+├── config.py              # Your actual config (DO NOT commit)
+├── database.py            # Database schema and stats
+├── collect_data.py        # Main data collector
+├── crypto_backtest.db     # SQLite database (created on first run)
+└── README.md              # This file
 ```
 
-Place `cdp_api_key.json` (Coinbase Developer Platform key with trade + view permissions) in the project root. This file is excluded from version control.
+## What's Next (Phase 2)
+Once data is collected, we build the backtest engine to test:
+- Momentum / mean reversion signals by bucket
+- Fear & Greed extreme signals (buy at Extreme Fear?)
+- Funding rate extremes as contrarian signals
+- Cross-signal combinations
 
-### 6. Run historical simulation
-
-```bash
-python3 backtest_autotrader.py                              # Default: Mar 2025 – Mar 2026
-python3 backtest_autotrader.py --start 2026-01-01 --end 2026-03-02
-```
-
-### 7. Deploy to PythonAnywhere (scheduled tasks)
-
-```
-00:30 UTC — python3 crypto_scanner.py
-00:45 UTC — python3 crypto_autotrader.py --check-entries
-01:00 UTC — python3 crypto_autotrader.py --check-exits
-08:00 UTC — python3 crypto_autotrader.py --daily-status
-```
-
-## Data Integrity
-
-The database includes a proactive corruption scanner that runs 5 checks on every update:
-
-| Check | What It Catches |
-|-------|-----------------|
-| Price spikes > 200% | Launch artifact placeholders, corrupt yfinance rows |
-| Near-zero prices (coin-relative) | Pre-launch placeholder rows (e.g. OP before May 2022 launch) |
-| Zero / NULL / negative prices | Bad API responses |
-| Duplicate rows | Double-inserts from collect_data.py retries |
-| Stale coins | Tickers that stopped updating (yfinance failures) |
-
-```bash
-python3 validate_crypto_db.py                     # Scan and report
-python3 validate_crypto_db.py --purge             # Scan and auto-purge safe rows
-python3 validate_crypto_db.py --output report.txt # Save report to file
-```
-
-Known corrupt data found and removed Mar 2026: 1,700+ rows across GRT (impossible prices above ATH), POL (dead ticker), OP (pre-launch placeholders), and a bad yfinance pull window across 5 coins.
-
-## Backtest Methodology
-
-- **Data**: 83,615+ daily observations across 40 coins (2014–2026)
-- **Winsorization**: 1st/99th percentile to limit outlier influence
-- **Transaction costs**: BTC/ETH 0.20%, Top 20 0.40%, Altcoins 0.80%
-- **Walk-forward validation**: Trained on 2014–2021, tested on 2022–2026
-- **Signal independence**: Jaccard similarity and conditional alpha tests confirm scoring components provide additive value
-
-## Key Signal Results
-
-- **4,650 signal events** over 12 years (~406/year)
-- **Out-of-sample alpha exceeds in-sample** (+7.27% vs +5.81%)
-- **Works in every market regime**: bear (+2.95% to +8.14%), bull (+4.09% to +6.89%), sideways (+7.22% to +9.46%)
-
-## Data Sources
-
-| Source | Data | Cost |
-|--------|------|------|
-| Yahoo Finance (yfinance) | Daily OHLCV prices | Free |
-| Alternative.me | Crypto Fear & Greed Index | Free |
-| Coinbase Advanced Trade API | Live order execution | Free (CDP) |
-
-## Disclaimer
-
-This project is for educational and research purposes only. Past backtest performance does not guarantee future results. Cryptocurrency trading involves substantial risk of loss. Always do your own research before making investment decisions.
-
----
-
-MIT License
+Same methodology as your equity backtests: define signal, measure forward returns at 3d/5d/10d/20d, calculate alpha vs. buy-and-hold, statistical significance.
