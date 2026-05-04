@@ -26,3 +26,7 @@ hold_window_optimizer.py
 price_path_analysis.py
 remove_stx_uni_from_db.py
 *.txt
+
+# Reference docs / test scratch (May 4 cleanup)
+*.pdf
+inject_test_trade.py
